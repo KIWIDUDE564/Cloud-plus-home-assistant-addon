@@ -1,6 +1,6 @@
 # SmartGen Cloud Bridge Home Assistant Add-on
 
-This add-on connects the SmartGen Cloud Plus API to Home Assistant using MQTT discovery. It polls the generator for live data and exposes sensors, binary sensors, and command switches so you can control and monitor your genset from Home Assistant. A sample Lovelace dashboard is included for a quick UI start.
+This add-on connects the SmartGen Cloud Plus API to Home Assistant using MQTT discovery. It polls the generator for live data and exposes sensors, binary sensors, and command switches so you can control and monitor your genset from Home Assistant. A sample Lovelace dashboard is included for a quick UI start. The bridge will automatically adopt the Supervisor-provided MQTT service details when available.
 
 ## Features
 - Polls SmartGen Cloud Plus status and publishes telemetry to MQTT.
@@ -26,7 +26,7 @@ All options live in `/data/options.json` managed by the Supervisor:
 | `token` | Captured SmartGen Cloud token (secret) | `""` |
 | `utoken` | Captured SmartGen Cloud utoken (secret) | `""` |
 | `poll_interval` | Seconds between status polls | `3` |
-| `mqtt_host` | MQTT broker hostname (Supervisor service is `core-mosquitto`) | `"core-mosquitto"` |
+| `mqtt_host` | MQTT broker hostname (Supervisor service is `core-mosquitto`; overridden automatically if Supervisor MQTT service is discovered) | `"core-mosquitto"` |
 | `mqtt_port` | MQTT broker port | `1883` |
 | `mqtt_username` | MQTT username (if required) | `""` |
 | `mqtt_password` | MQTT password (if required) | `""` |
@@ -37,7 +37,7 @@ All options live in `/data/options.json` managed by the Supervisor:
 SmartGen Cloud Plus does not expose a public login API. Use an HTTPS proxy (e.g., mitmproxy, HTTP Toolkit) on your mobile device to capture `token` and `utoken` from the SmartGen Cloud Plus app, then paste them into the add-on configuration. The add-on does **not** handle authentication or refresh.
 
 ## MQTT entities
-Entities are published under `<mqtt_base_topic>/<genset_address>` (e.g., `smartgen/7049`). MQTT discovery is used to register the following Home Assistant entities:
+Entities are published under `<mqtt_base_topic>/<genset_address>` (e.g., `smartgen/7049`). MQTT discovery is used to register the following Home Assistant entities, all of which include an availability topic:
 
 - Switches: start, stop, auto mode, manual mode, genset breaker close/open, mains breaker close/open.
 - Sensors: RPM, frequency, voltages (L1-L2, L2-L3, L3-L1), kW, run hours, active alarms.
@@ -67,3 +67,4 @@ Ensure `data/options.json` exists locally with the same structure as the Home As
 - Tokens are never logged. Debug logging only includes non-sensitive payload information.
 - The add-on will retry API calls with simple exponential backoff on failures.
 - MQTT discovery messages are retained; telemetry/state messages are not.
+- An availability topic (`<base>/availability`) is published for Home Assistant entities so the dashboard reflects MQTT connectivity.

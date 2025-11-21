@@ -90,6 +90,7 @@ class SmartGenBridge:
         self.poll_interval = int(config.get("poll_interval", DEFAULT_POLL_INTERVAL))
         self.mqtt_base = config.get("mqtt_base_topic", "smartgen")
         self.address = str(config.get("genset_address", ""))
+        self.availability_topic = f"{self.base_topic}/availability"
         self.command_map = {
             f"{self.base_topic}/command/start": "start",
             f"{self.base_topic}/command/stop": "stop",
@@ -99,10 +100,6 @@ class SmartGenBridge:
             f"{self.base_topic}/command/mains_closeopen": "maincloseopen",
         }
         self.mqtt_client = mqtt.Client()
-        username = config.get("mqtt_username")
-        password = config.get("mqtt_password")
-        if username:
-            self.mqtt_client.username_pw_set(username, password)
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.on_disconnect = self.on_disconnect
@@ -120,9 +117,49 @@ class SmartGenBridge:
             "name": f"SmartGen {self.address}",
         }
 
+    def resolve_mqtt_settings(self) -> Dict[str, Any]:
+        """Resolve MQTT connection details from Supervisor service if available."""
+        supervisor_token = os.getenv("SUPERVISOR_TOKEN")
+        supervisor_endpoint = os.getenv("SUPERVISOR_ENDPOINT", "http://supervisor")
+
+        if supervisor_token:
+            try:
+                response = requests.get(
+                    f"{supervisor_endpoint}/services/mqtt",
+                    headers={"Authorization": f"Bearer {supervisor_token}"},
+                    timeout=5,
+                )
+                response.raise_for_status()
+                data = response.json()
+                logging.info("Using MQTT service details from Supervisor")
+                return {
+                    "host": data.get("host", self.config.get("mqtt_host", "core-mosquitto")),
+                    "port": int(data.get("port", self.config.get("mqtt_port", 1883))),
+                    "username": data.get("username") or self.config.get("mqtt_username"),
+                    "password": data.get("password") or self.config.get("mqtt_password"),
+                }
+            except requests.RequestException as err:
+                logging.warning("Failed to load MQTT details from Supervisor: %s", err)
+
+        return {
+            "host": self.config.get("mqtt_host", "core-mosquitto"),
+            "port": int(self.config.get("mqtt_port", 1883)),
+            "username": self.config.get("mqtt_username"),
+            "password": self.config.get("mqtt_password"),
+        }
+
     def connect_mqtt(self) -> None:
-        host = self.config.get("mqtt_host", "core-mosquitto")
-        port = int(self.config.get("mqtt_port", 1883))
+        mqtt_settings = self.resolve_mqtt_settings()
+        host = mqtt_settings.get("host", "core-mosquitto")
+        port = int(mqtt_settings.get("port", 1883))
+        username = mqtt_settings.get("username")
+        password = mqtt_settings.get("password")
+
+        if username:
+            self.mqtt_client.username_pw_set(username, password)
+
+        self.mqtt_client.will_set(self.availability_topic, "offline", retain=True)
+
         logging.info("Connecting to MQTT broker %s:%s", host, port)
         self.mqtt_client.connect(host, port, keepalive=60)
         self.mqtt_client.loop_start()
@@ -132,6 +169,7 @@ class SmartGenBridge:
             logging.info("Connected to MQTT broker")
             for topic in self.command_map:
                 client.subscribe(topic)
+            client.publish(self.availability_topic, "online", retain=True)
             self.publish_discovery()
         else:
             logging.warning("Failed to connect to MQTT broker, rc=%s", rc)
@@ -159,6 +197,8 @@ class SmartGenBridge:
             topic = f"{discovery_base}/{domain}/smartgen_{self.address}_{object_id}/config"
             self.mqtt_client.publish(topic, json.dumps(payload), retain=retain)
 
+        availability = [{"topic": self.availability_topic}]
+
         switch_definitions = {
             "start": {"name": "Start", "icon": "mdi:power"},
             "stop": {"name": "Stop", "icon": "mdi:stop"},
@@ -177,6 +217,8 @@ class SmartGenBridge:
                 "payload_off": "OFF",
                 "device": self.device_info,
                 "icon": meta["icon"],
+                "availability": availability,
+                "availability_mode": "latest",
             }
             publish_config("switch", key, payload)
 
@@ -198,6 +240,8 @@ class SmartGenBridge:
                 "unique_id": f"smartgen_{self.address}_{key}",
                 "device": self.device_info,
                 "icon": icon,
+                "availability": availability,
+                "availability_mode": "latest",
             }
             if unit:
                 payload["unit_of_measurement"] = unit
@@ -225,6 +269,8 @@ class SmartGenBridge:
                 "payload_off": "OFF",
                 "device": self.device_info,
                 "icon": icon,
+                "availability": availability,
+                "availability_mode": "latest",
             }
             payload = {k: v for k, v in payload.items() if v is not None}
             publish_config("binary_sensor", key, payload)
