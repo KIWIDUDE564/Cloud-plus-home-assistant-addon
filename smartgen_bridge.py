@@ -7,7 +7,9 @@ from typing import Any, Dict, Optional
 import paho.mqtt.client as mqtt
 import requests
 
-BASE_URL = "http://www.smartgencloudplus.cn:8082"
+BASE_URL = "http://smartgencloudplus.cn:8082"
+STATUS_URL = f"{BASE_URL}/devicedata/getstatus"
+ACTION_URL = f"{BASE_URL}/devicedata/sendaction"
 OPTIONS_PATH = "/data/options.json"
 DEFAULT_POLL_INTERVAL = 3
 
@@ -22,8 +24,7 @@ class SmartGenClient:
         self.timezone = config.get("timezone", "Pacific/Honolulu")
         self.session = requests.Session()
 
-    def _post(self, path: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        url = f"{self.base_url}{path}"
+    def _post(self, url: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         payload = {
             "address": self.address,
             "language": self.language,
@@ -34,21 +35,22 @@ class SmartGenClient:
         }
         try:
             response = self.session.post(url, data=payload, timeout=10)
+            logging.debug("SmartGen status HTTP: %s", response.status_code)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as err:
-            logging.warning("SmartGen request failed for %s: %s", path, err)
+            logging.warning("SmartGen request failed for %s: %s", url, err)
         except json.JSONDecodeError:
-            logging.warning("SmartGen request returned non-JSON response for %s", path)
+            logging.warning("SmartGen request returned non-JSON response for %s", url)
         return None
 
     def send_action(self, act: str) -> Optional[Dict[str, Any]]:
         logging.info("Sending SmartGen action: %s", act)
-        return self._post("/devicedata/sendaction", {"act": act})
+        return self._post(ACTION_URL, {"act": act})
 
     def get_status(self) -> Optional[Dict[str, Any]]:
         for attempt in range(3):
-            result = self._post("/devicedata/getstatus", {})
+            result = self._post(STATUS_URL, {})
             if result is not None:
                 logging.debug("Received status payload")
                 return result

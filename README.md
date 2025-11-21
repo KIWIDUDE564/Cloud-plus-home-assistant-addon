@@ -68,3 +68,4 @@ Ensure `data/options.json` exists locally with the same structure as the Home As
 - The add-on will retry API calls with simple exponential backoff on failures.
 - MQTT discovery messages are retained; telemetry/state messages are not.
 - An availability topic (`<base>/availability`) is published for Home Assistant entities so the dashboard reflects MQTT connectivity.
+- SmartGen Cloud Plus API requests use POST form data against `http://smartgencloudplus.cn:8082/devicedata/getstatus` and `/devicedata/sendaction`.
