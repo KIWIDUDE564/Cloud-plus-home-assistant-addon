@@ -1,0 +1,121 @@
+views:
+  - title: SmartGen Generator
+    path: smartgen
+    badges: []
+    cards:
+      - type: markdown
+        content: |
+          # SmartGen Generator
+          Monitor and control your generator via SmartGen Cloud Bridge.
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            name: Running
+            entity: binary_sensor.smartgen_7049_running
+            icon: mdi:engine
+          - type: entity
+            name: Auto Mode
+            entity: binary_sensor.smartgen_7049_auto_mode
+            icon: mdi:alpha-a-circle
+          - type: entity
+            name: Mains Available
+            entity: binary_sensor.smartgen_7049_mains_available
+            icon: mdi:flash
+          - type: entity
+            name: Alarm
+            entity: binary_sensor.smartgen_7049_alarm
+            icon: mdi:alert
+      - type: gauge
+        name: RPM
+        entity: sensor.smartgen_7049_rpm
+        min: 0
+        max: 3000
+        severity:
+          green: 800
+          yellow: 2000
+          red: 2600
+      - type: gauge
+        name: Frequency
+        entity: sensor.smartgen_7049_frequency_hz
+        unit: Hz
+        min: 0
+        max: 80
+        severity:
+          green: 58
+          yellow: 50
+          red: 40
+      - type: gauge
+        name: Active Power
+        entity: sensor.smartgen_7049_kw
+        unit: kW
+        min: 0
+        max: 200
+        severity:
+          green: 20
+          yellow: 100
+          red: 150
+      - type: entities
+        title: Electrical Measurements
+        entities:
+          - entity: sensor.smartgen_7049_voltage_l1_l2
+            name: Voltage L1-L2
+          - entity: sensor.smartgen_7049_voltage_l2_l3
+            name: Voltage L2-L3
+          - entity: sensor.smartgen_7049_voltage_l3_l1
+            name: Voltage L3-L1
+          - entity: sensor.smartgen_7049_alarms_active
+            name: Active Alarms
+          - entity: sensor.smartgen_7049_run_hours
+            name: Run Hours
+      - type: horizontal-stack
+        cards:
+          - type: button
+            name: Start
+            icon: mdi:power
+            tap_action:
+              action: toggle
+            entity: switch.smartgen_7049_start
+            show_state: false
+            show_name: true
+            theme: green
+          - type: button
+            name: Stop
+            icon: mdi:stop
+            tap_action:
+              action: toggle
+            entity: switch.smartgen_7049_stop
+            show_state: false
+            show_name: true
+            theme: red
+          - type: button
+            name: Auto
+            icon: mdi:alpha-a-circle-outline
+            tap_action:
+              action: toggle
+            entity: switch.smartgen_7049_auto
+            show_state: false
+            show_name: true
+          - type: button
+            name: Manual
+            icon: mdi:hand
+            tap_action:
+              action: toggle
+            entity: switch.smartgen_7049_manual
+            show_state: false
+            show_name: true
+          - type: button
+            name: Genset C/O
+            icon: mdi:transmission-tower
+            tap_action:
+              action: toggle
+            entity: switch.smartgen_7049_genset_closeopen
+            show_state: false
+            show_name: true
+          - type: button
+            name: Mains C/O
+            icon: mdi:transmission-tower-export
+            tap_action:
+              action: toggle
+            entity: switch.smartgen_7049_mains_closeopen
+            show_state: false
+            show_name: true
