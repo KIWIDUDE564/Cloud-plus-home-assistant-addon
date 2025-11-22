@@ -26,6 +26,7 @@ class SmartGenCloudBridge:
         self.genset_address = str(config.get("genset_address", ""))
         self.poll_interval = int(config.get("poll_interval", DEFAULT_POLL_INTERVAL))
         self.request_timeout = int(config.get("request_timeout", DEFAULT_REQUEST_TIMEOUT))
+        self.cookie = str(config.get("cookie") or "")
         self.base_topic = config.get("base_topic", DEFAULT_BASE_TOPIC)
         self.mqtt_host = config.get("mqtt_host", "core-mosquitto")
         self.mqtt_port = int(config.get("mqtt_port", 1883))
@@ -68,10 +69,9 @@ class SmartGenCloudBridge:
             "User-Agent": "okhttp/4.9.0",
             "Accept": "application/json, text/plain, */*",
         }
-        if self.token:
-            cookie = str(self.token).strip().strip('"').strip("'")
-            if cookie:
-                headers["Cookie"] = f"smartgenyun_web={cookie}"
+        cookie = self.cookie.strip().strip('"').strip("'")
+        if cookie:
+            headers["Cookie"] = cookie
         return headers
 
     def _request(self, url: str, *, data: Optional[Dict[str, Any]] = None, json_body: Optional[Dict[str, Any]] = None) -> Optional[requests.Response]:

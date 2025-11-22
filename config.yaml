@@ -17,6 +17,7 @@ options:
   genset_address: ""
   poll_interval: 60
   request_timeout: 15
+  cookie: ""
   base_topic: "smartgen"
   mqtt_host: "core-mosquitto"
   mqtt_port: 1883
@@ -32,6 +33,7 @@ schema:
   genset_address: str
   poll_interval: int
   request_timeout: int
+  cookie: str
   base_topic: str
   mqtt_host: str
   mqtt_port: int
