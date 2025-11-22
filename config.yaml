@@ -1,5 +1,5 @@
 name: SmartGen Cloud Bridge
-version: 0.1.0
+version: 0.1.1
 slug: smartgen_cloud_bridge
 description: Connects SmartGen Cloud Plus generators to Home Assistant via MQTT
 arch:
@@ -9,8 +9,8 @@ arch:
 startup: services
 boot: auto
 options:
-  api_host: "smartgencloudplus.cn:8082"
-  use_https: false
+  api_host: "smartgencloudplus.cn"
+  use_https: true
   genset_address: "7049"
   language: "en-US"
   timezone: "Pacific/Honolulu"
