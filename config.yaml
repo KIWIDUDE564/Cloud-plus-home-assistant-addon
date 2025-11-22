@@ -10,13 +10,15 @@ startup: services
 boot: auto
 options:
   genset_address: "7049"
-  api_base: "https://smartgencloudplus.cn:8082"
+  api_base: "https://www.smartgencloudplus.cn"
   username: ""
   password: ""
   language: "en-US"
   timezone: "Asia/Shanghai"
   token: ""
   utoken: ""
+  cookie: ""
+  sign_secret: "smartgen"
   poll_interval: 30
   base_topic: "smartgen"
   mqtt_host: "core-mosquitto"
@@ -33,6 +35,8 @@ schema:
   timezone: str
   token: password
   utoken: password
+  cookie: str
+  sign_secret: str
   poll_interval: int
   base_topic: str
   mqtt_host: str
