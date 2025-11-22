@@ -69,7 +69,9 @@ class SmartGenCloudBridge:
             "Accept": "application/json, text/plain, */*",
         }
         if self.token:
-            headers["Cookie"] = f"smartgenyun_web={self.token}"
+            cookie = str(self.token).strip().strip('"').strip("'")
+            if cookie:
+                headers["Cookie"] = f"smartgenyun_web={cookie}"
         return headers
 
     def _request(self, url: str, *, data: Optional[Dict[str, Any]] = None, json_body: Optional[Dict[str, Any]] = None) -> Optional[requests.Response]:
