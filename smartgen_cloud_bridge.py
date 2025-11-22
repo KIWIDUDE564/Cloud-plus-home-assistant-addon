@@ -10,7 +10,8 @@ from typing import Any, Dict, Optional
 import requests
 from gmssl.sm4 import CryptSM4, SM4_DECRYPT, SM4_ENCRYPT
 
-API_BASE = "https://www.smartgencloudplus.cn/yewu"
+API_BASE = "https://www.smartgencloudplus.cn"
+API_PATH = "/yewu"
 SM4_KEY_HEX = "7346346d54327455307a55366d4c3775"
 SIGN_SECRET = "fsh@TRuZ4dvcp5uY"
 DEFAULT_LANGUAGE = "en-US"
@@ -72,7 +73,10 @@ def make_x_sign(timestamp: int, token: Optional[str], *, login: bool = False) ->
 
 class SmartGenCloudBridge:
     def __init__(self, config: Dict[str, Any]):
-        self.base_url = (config.get("api_base") or API_BASE).rstrip("/")
+        base = (config.get("api_base") or API_BASE).rstrip("/")
+        if not base.endswith(API_PATH):
+            base = f"{base}{API_PATH}"
+        self.base_url = base
         self.token = config.get("token") or ""
         self.utoken = config.get("utoken") or ""
         self.username = config.get("username") or ""

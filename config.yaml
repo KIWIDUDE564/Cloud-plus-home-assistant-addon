@@ -9,7 +9,7 @@ arch:
 startup: services
 boot: auto
 options:
-  api_base: "https://www.smartgencloudplus.cn/yewu"
+  api_base: "https://www.smartgencloudplus.cn"
   token: ""
   utoken: ""
   username: ""
