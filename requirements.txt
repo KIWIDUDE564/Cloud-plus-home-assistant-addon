@@ -1,4 +1,2 @@
-paho-mqtt
+gmssl
 requests
-pyyaml
-pycryptodome
