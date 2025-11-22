@@ -1,20 +1,19 @@
 import json
 import logging
 import os
-import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 import paho.mqtt.client as mqtt
 import requests
 
+from smartgen_client import SmartGenClient
+
 OPTIONS_PATH = "/data/options.json"
-DEFAULT_API_BASE = "https://smartgencloudplus.cn:8082"
-DEFAULT_POLL_INTERVAL = 30
+DEFAULT_POLL_INTERVAL = 60
 DEFAULT_BASE_TOPIC = "smartgen"
 HEARTBEAT_INTERVAL = 60
 REQUEST_TIMEOUT = 20
-
 
 def load_config(path: str = OPTIONS_PATH) -> Dict[str, Any]:
     try:
@@ -29,114 +28,6 @@ def load_config(path: str = OPTIONS_PATH) -> Dict[str, Any]:
 def configure_logging(level: str) -> None:
     numeric_level = getattr(logging, level.upper(), logging.INFO)
     logging.basicConfig(level=numeric_level, format="%(asctime)s [%(levelname)s] %(message)s")
-
-
-class JsonParser:
-    @staticmethod
-    def parse_response(response: requests.Response) -> Dict[str, Any]:
-        try:
-            return response.json()
-        except Exception:  # noqa: BLE001
-            text = response.text if response is not None else ""
-            logging.warning("Failed JSON parse; attempting regex extraction (status=%s)", getattr(response, "status_code", "?"))
-            candidate = JsonParser.extract_json_like(text)
-            if candidate:
-                try:
-                    return json.loads(candidate)
-                except Exception as err:  # noqa: BLE001
-                    logging.warning("Secondary JSON load failed: %s", err)
-            if text:
-                logging.debug("Raw response body (truncated): %s", text[:500])
-        return {}
-
-    @staticmethod
-    def extract_json_like(text: str) -> Optional[str]:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        return match.group(0) if match else None
-
-
-class SmartGenApiClient:
-    def __init__(self, config: Dict[str, Any]):
-        self.session = requests.Session()
-        self.base_url = (config.get("api_base") or DEFAULT_API_BASE).rstrip("/")
-        self.username = config.get("username") or config.get("user") or ""
-        self.password = config.get("password") or config.get("pass") or ""
-        self.token = config.get("token") or ""
-        self.utoken = config.get("utoken") or ""
-        self.device_id = str(config.get("genset_address") or config.get("address") or "unknown")
-        self.language = config.get("language", "en-US")
-        self.timezone = config.get("timezone", "UTC")
-        self.paths = ["/user/login", "/user/info", "/genset/mylist", "/genset/list", "/genset/getNav"]
-
-    def _url(self, path: str) -> str:
-        normalized = path if path.startswith("/") else f"/{path}"
-        return f"{self.base_url}{normalized}"
-
-    def _send_request(self, path: str, payload: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        url = self._url(path)
-        try:
-            logging.debug("POST %s", url)
-            response = self.session.post(url, data=payload, timeout=REQUEST_TIMEOUT)
-        except requests.RequestException as err:
-            logging.error("Network error calling %s: %s", url, err)
-            return False, {}
-
-        logging.debug("HTTP %s -> %s", response.status_code, url)
-        content_type = response.headers.get("Content-Type", "").lower()
-        body = response.text[:500]
-        if "text/html" in content_type or body.strip().startswith("<"):
-            logging.warning("Received HTML response from %s; skipping JSON parse", url)
-            return False, {}
-
-        data = JsonParser.parse_response(response)
-        self._update_tokens(data)
-        return True, data
-
-    def _update_tokens(self, data: Dict[str, Any]) -> None:
-        token = data.get("token") or data.get("Token")
-        utoken = data.get("utoken") or data.get("uToken") or data.get("UToken")
-        if token:
-            self.token = token
-            logging.info("Updated token from response")
-        if utoken:
-            self.utoken = utoken
-            logging.info("Updated utoken from response")
-
-    def _base_payload(self) -> Dict[str, Any]:
-        payload = {
-            "token": self.token,
-            "utoken": self.utoken,
-            "address": self.device_id,
-            "language": self.language,
-            "timezone": self.timezone,
-        }
-        if self.username:
-            payload["username"] = self.username
-        if self.password:
-            payload["password"] = self.password
-        return {k: v for k, v in payload.items() if v is not None}
-
-    def fetch_snapshot(self) -> Dict[str, Any]:
-        payload = self._base_payload()
-        for path in self.paths:
-            ok, data = self._send_request(path, payload)
-            if not ok or not data:
-                continue
-            normalized = self._normalize_payload(data)
-            if normalized:
-                return normalized
-        logging.error("All API endpoints failed; returning empty snapshot")
-        return {}
-
-    def _normalize_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        if not isinstance(data, dict):
-            return {}
-        candidate = data.get("data") if isinstance(data.get("data"), (dict, list)) else data
-        if isinstance(candidate, list):
-            candidate = candidate[0] if candidate else {}
-        result = candidate if isinstance(candidate, dict) else {}
-        result.setdefault("device_id", self.device_id)
-        return result
 
 
 class SmartGenMqttBridge:
@@ -255,10 +146,16 @@ class SmartGenBridge:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.poll_interval = int(config.get("poll_interval", DEFAULT_POLL_INTERVAL))
-        self.api_client = SmartGenApiClient(config)
+        self.api_client = SmartGenClient(config)
         self.mqtt_bridge = SmartGenMqttBridge(config)
         self.last_heartbeat = 0
         self.failure_count = 0
+        logging.info(
+            "SmartGen bridge configured for base=%s address=%s interval=%ss",
+            config.get("api_base", "http://www.smartgencloudplus.cn"),
+            self.api_client.device_id,
+            self.poll_interval,
+        )
 
     def start(self) -> None:
         self.mqtt_bridge.connect()
@@ -268,7 +165,7 @@ class SmartGenBridge:
     def _tick(self) -> None:
         self._maybe_heartbeat()
         try:
-            snapshot = self.api_client.fetch_snapshot()
+            snapshot = self.api_client.fetch_status()
             if snapshot:
                 device_id = str(snapshot.get("device_id") or self.api_client.device_id)
                 self.mqtt_bridge.publish_device_state(device_id, snapshot)
@@ -276,6 +173,9 @@ class SmartGenBridge:
             else:
                 self.failure_count += 1
                 logging.warning("No snapshot available; failure count=%s", self.failure_count)
+        except ValueError as err:
+            self.failure_count += 1
+            logging.error("Configuration error: %s", err)
         except Exception as err:  # noqa: BLE001
             self.failure_count += 1
             logging.error("Error in main loop: %s", err)
