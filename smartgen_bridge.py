@@ -2,40 +2,118 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import paho.mqtt.client as mqtt
 import requests
 
-BASE_URL = "http://smartgencloudplus.cn:8082"
-STATUS_URL = f"{BASE_URL}/devicedata/getstatus"
-ACTION_URL = f"{BASE_URL}/devicedata/sendaction"
+BASE_PATH = "/yewu"
 OPTIONS_PATH = "/data/options.json"
 DEFAULT_POLL_INTERVAL = 3
 
 
 class SmartGenClient:
     def __init__(self, config: Dict[str, Any]) -> None:
-        self.base_url = BASE_URL
-        self.token = config.get("token", "")
-        self.utoken = config.get("utoken", "")
+        self.host = config.get("api_host", "smartgencloudplus.cn:8082")
+        self.use_https = bool(config.get("use_https", False))
+        self.username = config.get("username", "")
+        self.password = config.get("password", "")
         self.address = str(config.get("genset_address", ""))
         self.language = config.get("language", "en-US")
         self.timezone = config.get("timezone", "Pacific/Honolulu")
         self.session = requests.Session()
+        self.token: Optional[str] = None
+        self.company_id: Optional[str] = None
+        self.user_id: Optional[str] = None
 
-    def _post(self, url: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    @property
+    def base_url(self) -> str:
+        scheme = "https" if self.use_https else "http"
+        return f"{scheme}://{self.host}{BASE_PATH}"
+
+    def build_url(self, path: str) -> str:
+        normalized = path if path.startswith("/") else f"/{path}"
+        return f"{self.base_url}{normalized}"
+
+    def _auth_headers(self) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        if self.token:
+            headers["X-Token"] = self.token
+        if self.company_id:
+            headers["X-Companyid"] = str(self.company_id)
+        if self.user_id:
+            headers["X-User"] = str(self.user_id)
+        headers["X-Time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return headers
+
+    def login(self) -> bool:
+        url = self.build_url("/user/login")
         payload = {
-            "address": self.address,
-            "language": self.language,
-            "timezone": self.timezone,
-            "token": self.token,
-            "utoken": self.utoken,
-            **data,
+            "username": self.username,
+            "password": self.password,
         }
         try:
-            response = self.session.post(url, data=payload, timeout=10)
-            logging.debug("SmartGen status HTTP: %s", response.status_code)
+            response = self.session.post(url, json=payload, timeout=15)
+            logging.debug("SmartGen login HTTP: %s", response.status_code)
+            response.raise_for_status()
+            data = response.json()
+            self.token = data.get("token") or data.get("X-Token")
+            self.company_id = data.get("companyid") or data.get("companyId")
+            self.user_id = (
+                data.get("userid")
+                or data.get("userId")
+                or data.get("username")
+                or self.username
+            )
+            if not self.token:
+                logging.error("Login response missing token")
+                return False
+            logging.info("Logged in to SmartGen host %s as %s", self.host, self.username)
+            return True
+        except requests.RequestException as err:
+            logging.error("SmartGen login failed: %s", err)
+        except json.JSONDecodeError:
+            logging.error("SmartGen login returned non-JSON response")
+        return False
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        require_auth: bool = True,
+        allow_retry: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        if require_auth and not self.token:
+            if not self.login():
+                return None
+
+        url = self.build_url(path)
+        headers = self._auth_headers() if require_auth else {}
+        try:
+            response = self.session.request(
+                method.upper(),
+                url,
+                json=data,
+                params=params,
+                headers=headers,
+                timeout=15,
+            )
+            logging.debug("SmartGen request HTTP %s: %s", url, response.status_code)
+            if response.status_code == 401 and require_auth and allow_retry:
+                logging.warning("Auth failed, attempting re-login")
+                if self.login():
+                    return self._request(
+                        method,
+                        path,
+                        data=data,
+                        params=params,
+                        require_auth=require_auth,
+                        allow_retry=False,
+                    )
             response.raise_for_status()
             return response.json()
         except requests.RequestException as err:
@@ -46,11 +124,28 @@ class SmartGenClient:
 
     def send_action(self, act: str) -> Optional[Dict[str, Any]]:
         logging.info("Sending SmartGen action: %s", act)
-        return self._post(ACTION_URL, {"act": act})
+        return self._request(
+            "post",
+            "/devicedata/sendaction",
+            data={
+                "act": act,
+                "address": self.address,
+                "language": self.language,
+                "timezone": self.timezone,
+            },
+        )
 
     def get_status(self) -> Optional[Dict[str, Any]]:
         for attempt in range(3):
-            result = self._post(STATUS_URL, {})
+            result = self._request(
+                "post",
+                "/genset/reportone",
+                data={
+                    "address": self.address,
+                    "language": self.language,
+                    "timezone": self.timezone,
+                },
+            )
             if result is not None:
                 logging.debug("Received status payload")
                 return result
@@ -373,8 +468,10 @@ def configure_logging(level: str) -> None:
 def main() -> None:
     config = load_config()
     configure_logging(config.get("log_level", "info"))
-    if not config.get("token") or not config.get("utoken"):
-        logging.warning("Token or utoken is empty. Please update the add-on configuration.")
+    if not config.get("api_host"):
+        logging.warning("API host is not configured; defaulting to smartgencloudplus.cn:8082")
+    if not config.get("username") or not config.get("password"):
+        logging.warning("Username or password is empty. Please update the add-on configuration.")
     bridge = SmartGenBridge(config)
     bridge.loop()
 

@@ -20,11 +20,13 @@ All options live in `/data/options.json` managed by the Supervisor:
 
 | Option | Description | Default |
 | --- | --- | --- |
+| `api_host` | SmartGen Cloud host (domain or IP, no scheme). Only the `/yewu` base path is hard-coded. | `"smartgencloudplus.cn:8082"` |
+| `use_https` | Whether to use HTTPS when talking to the SmartGen API. | `false` |
 | `genset_address` | Generator address/id from SmartGen Cloud | `"7049"` |
 | `language` | Language code for API calls | `"en-US"` |
 | `timezone` | Time zone string for API calls | `"Pacific/Honolulu"` |
-| `token` | Captured SmartGen Cloud token (secret) | `""` |
-| `utoken` | Captured SmartGen Cloud utoken (secret) | `""` |
+| `username` | SmartGen Cloud username for login | `""` |
+| `password` | SmartGen Cloud password for login | `""` |
 | `poll_interval` | Seconds between status polls | `3` |
 | `mqtt_host` | MQTT broker hostname (Supervisor service is `core-mosquitto`; overridden automatically if Supervisor MQTT service is discovered) | `"core-mosquitto"` |
 | `mqtt_port` | MQTT broker port | `1883` |
@@ -33,8 +35,8 @@ All options live in `/data/options.json` managed by the Supervisor:
 | `mqtt_base_topic` | Root MQTT topic for publishing | `"smartgen"` |
 | `log_level` | Logging level (`debug`, `info`, `warning`, `error`) | `"info"` |
 
-### Capturing token and utoken
-SmartGen Cloud Plus does not expose a public login API. Use an HTTPS proxy (e.g., mitmproxy, HTTP Toolkit) on your mobile device to capture `token` and `utoken` from the SmartGen Cloud Plus app, then paste them into the add-on configuration. The add-on does **not** handle authentication or refresh.
+### Authentication
+The add-on logs in directly against the SmartGen Cloud API using the configured `username` and `password`. Requests target `http://<api_host>/yewu/...` or `https://<api_host>/yewu/...` depending on `use_https`. After login, all subsequent API calls automatically include the SmartGen headers expected by the service (`X-Token`, `X-Companyid`, `X-Time`, and `X-User`).
 
 ## MQTT entities
 Entities are published under `<mqtt_base_topic>/<genset_address>` (e.g., `smartgen/7049`). MQTT discovery is used to register the following Home Assistant entities, all of which include an availability topic:
@@ -68,4 +70,4 @@ Ensure `data/options.json` exists locally with the same structure as the Home As
 - The add-on will retry API calls with simple exponential backoff on failures.
 - MQTT discovery messages are retained; telemetry/state messages are not.
 - An availability topic (`<base>/availability`) is published for Home Assistant entities so the dashboard reflects MQTT connectivity.
-- SmartGen Cloud Plus API requests use POST form data against `http://smartgencloudplus.cn:8082/devicedata/getstatus` and `/devicedata/sendaction`.
+- SmartGen Cloud Plus API requests use the `/yewu` base path and authenticated endpoints such as `/user/login`, `/genset/mylist`, and `/genset/reportone`.
