@@ -10,7 +10,7 @@ import requests
 from smartgen_client import SmartGenClient
 
 OPTIONS_PATH = "/data/options.json"
-DEFAULT_POLL_INTERVAL = 30
+DEFAULT_POLL_INTERVAL = 60
 DEFAULT_BASE_TOPIC = "smartgen"
 HEARTBEAT_INTERVAL = 60
 REQUEST_TIMEOUT = 20
@@ -150,6 +150,12 @@ class SmartGenBridge:
         self.mqtt_bridge = SmartGenMqttBridge(config)
         self.last_heartbeat = 0
         self.failure_count = 0
+        logging.info(
+            "SmartGen bridge configured for base=%s address=%s interval=%ss",
+            config.get("api_base", "http://www.smartgencloudplus.cn"),
+            self.api_client.device_id,
+            self.poll_interval,
+        )
 
     def start(self) -> None:
         self.mqtt_bridge.connect()

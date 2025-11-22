@@ -1,25 +1,25 @@
 name: SmartGen Cloud Bridge
-version: 0.3.0
+version: 0.4.0
 slug: smartgen_cloud_bridge
-description: Connects SmartGen Cloud Plus generators to Home Assistant via MQTT
+description: "Bridge SmartGen Cloud Plus (SmartGen Cloud+) to MQTT for Home Assistant."
 arch:
   - amd64
-  - armv7
   - aarch64
+  - armv7
 startup: services
 boot: auto
 options:
-  genset_address: "7049"
-  api_base: "https://www.smartgencloudplus.cn"
+  api_base: "http://www.smartgencloudplus.cn"
   username: ""
   password: ""
   language: "en-US"
-  timezone: "Asia/Shanghai"
+  timezone: "Etc/UTC"
   token: ""
   utoken: ""
   cookie: ""
-  sign_secret: "smartgen"
-  poll_interval: 30
+  sign_secret: ""
+  genset_address: ""
+  poll_interval: 60
   base_topic: "smartgen"
   mqtt_host: "core-mosquitto"
   mqtt_port: 1883
@@ -27,7 +27,6 @@ options:
   mqtt_password: ""
   log_level: "info"
 schema:
-  genset_address: str
   api_base: str
   username: str
   password: str
@@ -37,10 +36,11 @@ schema:
   utoken: password
   cookie: str
   sign_secret: str
+  genset_address: str
   poll_interval: int
   base_topic: str
   mqtt_host: str
   mqtt_port: int
   mqtt_username: str
   mqtt_password: str
-  log_level: str
+  log_level: list(info|debug|warning|error)

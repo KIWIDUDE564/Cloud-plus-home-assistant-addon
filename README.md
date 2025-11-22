@@ -1,6 +1,6 @@
 # SmartGen Cloud Bridge Home Assistant Add-on
 
-This add-on connects the SmartGen Cloud+/CloudGenMonDev API to Home Assistant using MQTT discovery. It polls the generator for live data with the SmartGen web client flow (token/utoken authentication, `X-Token`/`X-Time`/`X-Sign` headers, and multipart form bodies) and exposes sensors, binary sensors, and command switches so you can control and monitor your genset from Home Assistant. A sample Lovelace dashboard is included for a quick UI start. The bridge will automatically adopt the Supervisor-provided MQTT service details when available.
+This add-on connects the SmartGen Cloud+/CloudGenMonDev API to Home Assistant using MQTT discovery. It polls the generator for live data with the SmartGen web client flow (token/utoken authentication, `X-Token`/`X-Time`/`X-Sign` headers, and multipart form bodies) and exposes sensors, binary sensors, and command switches so you can control and monitor your genset from Home Assistant. A sample Lovelace dashboard is included for a quick UI start. The bridge will automatically adopt the Supervisor-provided MQTT service details when available. Requests target the same host used by the browser (`http://www.smartgencloudplus.cn`) unless overridden in the add-on options.
 
 ## Features
 - Polls SmartGen Cloud Plus status and publishes telemetry to MQTT.
@@ -20,23 +20,24 @@ All options live in `/data/options.json` managed by the Supervisor:
 
 | Option | Description | Default |
 | --- | --- | --- |
-| `genset_address` | Generator address/id from SmartGen Cloud | `"7049"` |
+| `api_base` | SmartGen Cloud base URL | `"http://www.smartgencloudplus.cn"` |
+| `genset_address` | Generator address/id from SmartGen Cloud | `""` |
 | `language` | Language code for API calls | `"en-US"` |
-| `timezone` | Time zone string for API calls | `"Asia/Shanghai"` |
+| `timezone` | Time zone string for API calls | `"Etc/UTC"` |
 | `token` | Captured SmartGen Cloud token (from the web app) | `""` |
 | `utoken` | Captured SmartGen Cloud utoken | `""` |
 | `cookie` | Optional cookie string copied from the CloudGenMonDev session (passed through to SmartGen requests) | `""` |
-| `sign_secret` | Secret suffix used when building `X-Sign` | `"smartgen"` |
-| `poll_interval` | Seconds between status polls | `30` |
+| `sign_secret` | Secret suffix used when building `X-Sign` and encrypting login payloads | `""` (falls back to `smartgen`) |
+| `poll_interval` | Seconds between status polls | `60` |
 | `mqtt_host` | MQTT broker hostname (Supervisor service is `core-mosquitto`; overridden automatically if Supervisor MQTT service is discovered) | `"core-mosquitto"` |
 | `mqtt_port` | MQTT broker port | `1883` |
 | `mqtt_username` | MQTT username (if required) | `""` |
 | `mqtt_password` | MQTT password (if required) | `""` |
-| `mqtt_base_topic` | Root MQTT topic for publishing | `"smartgen"` |
+| `base_topic` | Root MQTT topic for publishing | `"smartgen"` |
 | `log_level` | Logging level (`debug`, `info`, `warning`, `error`) | `"info"` |
 
 ### Authentication
-The add-on uses captured SmartGen Cloud `token` and `utoken` (and optional cookies) from the CloudGenMonDev web client; no interactive login flow is performed. Requests target `https://www.smartgencloudplus.cn/yewu/devicedata/getstatus` with multipart form payloads including `token`, `utoken`, `language`, `timezone`, and the configured generator address. Each request sends `User-Agent: okhttp/4.9.0`, `X-Token`, `X-Time`, and `X-Sign`, where `X-Sign` is derived from the tokens, a millisecond timestamp, and a shared secret. HTML responses are detected and skipped to avoid JSON errors.
+The add-on can either reuse captured SmartGen Cloud `token` and `utoken` (plus optional cookies) or perform a best-effort login using the same encrypted `paramStr` payload style seen in the CloudGenMonDev web client. Requests default to `http://www.smartgencloudplus.cn/yewu/devicedata/getstatus` with multipart form payloads including `token`, `utoken`, `language`, `timezone`, and the configured generator address. Each request sends `User-Agent: okhttp/4.9.0`, `X-Token`, `X-Time`, and `X-Sign`, where `X-Sign` is derived from the tokens, a millisecond timestamp, and a shared secret. HTML responses are detected and skipped to avoid JSON errors.
 
 ## MQTT entities
 Entities are published under `<mqtt_base_topic>/<genset_address>` (e.g., `smartgen/7049`). MQTT discovery is used to register the following Home Assistant entities, all of which include an availability topic:
@@ -71,5 +72,5 @@ Ensure `data/options.json` exists locally with the same structure as the Home As
 - The add-on will retry API calls with simple exponential backoff on failures.
 - MQTT discovery messages are retained; telemetry/state messages are not.
 - An availability topic (`<base>/availability`) is published for Home Assistant entities so the dashboard reflects MQTT connectivity.
-- SmartGen Cloud Plus API requests target `https://www.smartgencloudplus.cn/yewu/devicedata/getstatus` with the same header shape the web client uses (`X-Token`, `X-Time`, `X-Sign`).
+- SmartGen Cloud Plus API requests target `http://www.smartgencloudplus.cn/yewu/devicedata/getstatus` with the same header shape the web client uses (`X-Token`, `X-Time`, `X-Sign`).
 - Supervisor MQTT discovery requests include the Supervisor token and gracefully fall back to manual MQTT settings if access is denied.
