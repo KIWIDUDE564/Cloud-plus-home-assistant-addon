@@ -7,8 +7,7 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY main.py /app/main.py
-COPY smartgen_client.py /app/smartgen_client.py
+COPY smartgen_cloud_bridge.py /app/smartgen_cloud_bridge.py
 COPY run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 

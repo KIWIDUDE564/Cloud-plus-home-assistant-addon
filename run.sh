@@ -2,4 +2,4 @@
 set -e
 
 echo "[SmartGen Cloud Bridge] Starting bridge..."
-exec python3 /app/main.py
+exec python3 /app/smartgen_cloud_bridge.py
