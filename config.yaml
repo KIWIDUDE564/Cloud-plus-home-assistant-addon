@@ -9,34 +9,30 @@ arch:
 startup: services
 boot: auto
 options:
-  api_base: "http://www.smartgencloudplus.cn"
+  api_base: "https://www.smartgencloudplus.cn/yewu"
   token: ""
   utoken: ""
+  username: ""
+  password: ""
+  token_file: "/home/solar-assistant/smartgen_tokens.json"
+  company_id: 1
   language: "en-US"
   timezone: "Asia/Shanghai"
-  genset_address: ""
-  poll_interval: 60
-  request_timeout: 15
-  cookie: ""
-  base_topic: "smartgen"
-  mqtt_host: "core-mosquitto"
-  mqtt_port: 1883
-  mqtt_username: ""
-  mqtt_password: ""
+  poll_interval: 30
+  timeout: 15
+  update_date: "20250321"
   log_level: "info"
 schema:
   api_base: str
   token: password
   utoken: password
+  username: str
+  password: password
+  token_file: str
+  company_id: int
   language: str
   timezone: str
-  genset_address: str
   poll_interval: int
-  request_timeout: int
-  cookie: str
-  base_topic: str
-  mqtt_host: str
-  mqtt_port: int
-  mqtt_username: str
-  mqtt_password: str
+  timeout: int
+  update_date: str
   log_level: list(info|debug|warning|error)

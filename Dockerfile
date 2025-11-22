@@ -4,6 +4,8 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+RUN apk add --no-cache build-base
+
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 

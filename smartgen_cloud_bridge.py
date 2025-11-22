@@ -1,162 +1,259 @@
+import base64
+import gzip
+import hashlib
 import json
 import logging
 import os
 import time
 from typing import Any, Dict, Optional
 
-import paho.mqtt.client as mqtt
 import requests
+from gmssl.sm4 import CryptSM4, SM4_DECRYPT, SM4_ENCRYPT
 
-OPTIONS_PATH = "/data/options.json"
-DEFAULT_POLL_INTERVAL = 60
-DEFAULT_BASE_TOPIC = "smartgen"
+API_BASE = "https://www.smartgencloudplus.cn/yewu"
+SM4_KEY_HEX = "7346346d54327455307a55366d4c3775"
+SIGN_SECRET = "fsh@TRuZ4dvcp5uY"
 DEFAULT_LANGUAGE = "en-US"
 DEFAULT_TIMEZONE = "Asia/Shanghai"
-DEFAULT_REQUEST_TIMEOUT = 15
+DEFAULT_TIMEOUT = 15
+DEFAULT_POLL_INTERVAL = 30
+DEFAULT_UPDATE_DATE = "20250321"
+DEFAULT_COMPANY_ID = "1"
+OPTIONS_PATH = "/data/options.json"
+DEFAULT_TOKEN_FILE = "/home/solar-assistant/smartgen_tokens.json"
+
+
+def md5_hex(value: str) -> str:
+    return hashlib.md5(value.encode("utf-8")).hexdigest()
+
+
+def pkcs7_pad(data: bytes, block_size: int = 16) -> bytes:
+    padding_len = block_size - (len(data) % block_size)
+    return data + bytes([padding_len] * padding_len)
+
+
+def pkcs7_unpad(data: bytes, block_size: int = 16) -> bytes:
+    if not data:
+        raise ValueError("Invalid padding: empty data")
+    padding_len = data[-1]
+    if padding_len < 1 or padding_len > block_size:
+        raise ValueError("Invalid padding length")
+    if data[-padding_len:] != bytes([padding_len] * padding_len):
+        raise ValueError("Invalid padding bytes")
+    return data[:-padding_len]
+
+
+def sm4_encrypt(plaintext: str) -> str:
+    crypt = CryptSM4()
+    crypt.set_key(bytes.fromhex(SM4_KEY_HEX), SM4_ENCRYPT)
+    padded = pkcs7_pad(plaintext.encode("utf-8"))
+    encrypted = crypt.crypt_ecb(padded)
+    return base64.b64encode(encrypted).decode("utf-8")
+
+
+def sm4_decrypt(ciphertext_b64: str) -> str:
+    crypt = CryptSM4()
+    crypt.set_key(bytes.fromhex(SM4_KEY_HEX), SM4_DECRYPT)
+    cipher_bytes = base64.b64decode(ciphertext_b64)
+    decrypted_padded = crypt.crypt_ecb(cipher_bytes)
+    return pkcs7_unpad(decrypted_padded).decode("utf-8")
+
+
+def make_x_sign(timestamp: int, token: Optional[str], *, login: bool = False) -> str:
+    token_value = token or ""
+    if token_value:
+        inner = md5_hex(f"{token_value}{timestamp}{SIGN_SECRET}")
+        return md5_hex(f"{token_value}{timestamp}{inner}")
+    if login:
+        inner = md5_hex(f"{timestamp}{SIGN_SECRET}")
+        return md5_hex(f"{timestamp}{inner}")
+    return md5_hex(f"{timestamp}{SIGN_SECRET}")
 
 
 class SmartGenCloudBridge:
     def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.api_base = (config.get("api_base") or "http://www.smartgencloudplus.cn").rstrip("/")
-        self.token = config.get("token", "")
-        self.utoken = config.get("utoken", "")
+        self.base_url = (config.get("api_base") or API_BASE).rstrip("/")
+        self.token = config.get("token") or ""
+        self.utoken = config.get("utoken") or ""
+        self.username = config.get("username") or ""
+        self.password = config.get("password") or ""
+        self.company_id = str(config.get("company_id", DEFAULT_COMPANY_ID))
         self.language = config.get("language", DEFAULT_LANGUAGE)
         self.timezone = config.get("timezone", DEFAULT_TIMEZONE)
-        self.genset_address = str(config.get("genset_address", ""))
+        self.timeout = int(config.get("timeout", DEFAULT_TIMEOUT))
         self.poll_interval = int(config.get("poll_interval", DEFAULT_POLL_INTERVAL))
-        self.request_timeout = int(config.get("request_timeout", DEFAULT_REQUEST_TIMEOUT))
-        self.cookie = str(config.get("cookie") or "")
-        self.base_topic = config.get("base_topic", DEFAULT_BASE_TOPIC)
-        self.mqtt_host = config.get("mqtt_host", "core-mosquitto")
-        self.mqtt_port = int(config.get("mqtt_port", 1883))
-        self.mqtt_username = config.get("mqtt_username") or None
-        self.mqtt_password = config.get("mqtt_password") or None
-        self.session = requests.Session()
-        self.mqtt_client = self._setup_mqtt()
+        self.update_date = config.get("update_date", DEFAULT_UPDATE_DATE)
+        self.token_file = config.get("token_file", DEFAULT_TOKEN_FILE)
 
-    def _setup_mqtt(self) -> mqtt.Client:
-        client = mqtt.Client()
-        if self.mqtt_username:
-            client.username_pw_set(self.mqtt_username, self.mqtt_password)
-        client.on_connect = self._on_connect
-        client.on_disconnect = self._on_disconnect
+        self.load_tokens()
 
-        while True:
+    def load_tokens(self) -> None:
+        if os.path.exists(self.token_file):
             try:
-                logging.info("Connecting to MQTT %s:%s", self.mqtt_host, self.mqtt_port)
-                client.connect(self.mqtt_host, self.mqtt_port, keepalive=60)
-                client.loop_start()
-                break
+                with open(self.token_file, "r", encoding="utf-8") as token_file:
+                    data = json.load(token_file)
+                    self.token = data.get("token", self.token)
+                    self.utoken = data.get("utoken", self.utoken)
             except Exception as err:  # noqa: BLE001
-                logging.error("MQTT connection failed: %s", err)
-                time.sleep(5)
-        return client
+                logging.warning("Failed to load tokens from %s: %s", self.token_file, err)
 
-    @staticmethod
-    def _on_connect(client: mqtt.Client, userdata: Any, flags: Dict[str, Any], rc: int):  # noqa: ARG002
-        if rc == 0:
-            logging.info("MQTT connected")
-        else:
-            logging.warning("MQTT connection returned code %s", rc)
+    def save_tokens(self) -> None:
+        payload = {
+            "token": self.token,
+            "utoken": self.utoken,
+            "timestamp": int(time.time()),
+        }
+        try:
+            os.makedirs(os.path.dirname(self.token_file), exist_ok=True)
+            with open(self.token_file, "w", encoding="utf-8") as token_file:
+                json.dump(payload, token_file, indent=2)
+        except Exception as err:  # noqa: BLE001
+            logging.error("Failed to save tokens to %s: %s", self.token_file, err)
 
-    @staticmethod
-    def _on_disconnect(client: mqtt.Client, userdata: Any, rc: int):  # noqa: ARG002
-        logging.warning("MQTT disconnected (rc=%s)", rc)
-
-    def _headers(self) -> Dict[str, str]:
-        headers = {
-            "User-Agent": "okhttp/4.9.0",
+    def _build_headers(self, token: str, timestamp: int, x_sign: str) -> Dict[str, str]:
+        return {
             "Accept": "application/json, text/plain, */*",
+            "Accept-Language": self.language,
+            "User-Agent": "okhttp/4.9.0",
+            "X-Time": str(timestamp),
+            "X-Timezone": self.timezone,
+            "X-UpdateDate": self.update_date,
+            "X-Companyid": self.company_id,
+            "X-Token": token,
+            "X-Sign": x_sign,
+            "Referer": "https://www.smartgencloudplus.cn/index",
+            "Content-Type": "text/plain;charset=UTF-8",
         }
-        cookie = self.cookie.strip().strip('"').strip("'")
-        if cookie:
-            headers["Cookie"] = cookie
-        return headers
 
-    def _request(self, url: str, *, data: Optional[Dict[str, Any]] = None, json_body: Optional[Dict[str, Any]] = None) -> Optional[requests.Response]:
+    def _encrypt_payload(self, payload: Dict[str, Any]) -> str:
+        payload_json = json.dumps(payload, separators=(",", ":"))
+        return sm4_encrypt(payload_json)
+
+    def _decode_response(self, response: requests.Response) -> Dict[str, Any]:
+        raw_bytes = response.content or b""
+        if response.headers.get("Content-Encoding", "").lower() == "gzip":
+            try:
+                raw_bytes = gzip.decompress(raw_bytes)
+            except OSError:
+                pass
         try:
-            if json_body is not None:
-                response = self.session.post(url, json=json_body, headers=self._headers(), timeout=self.request_timeout)
-            else:
-                response = self.session.post(url, data=data, headers=self._headers(), timeout=self.request_timeout)
-            response.raise_for_status()
-            return response
-        except requests.RequestException as err:
-            logging.error("Request failed for %s: %s", url, err)
-            return None
+            body_text = raw_bytes.decode(response.encoding or "utf-8")
+        except Exception:
+            body_text = raw_bytes.decode("utf-8", errors="ignore")
 
-    def fetch_status(self) -> Optional[Dict[str, Any]]:
-        url = f"{self.api_base}/yewu/devicedata/getstatus"
-        payload = {
-            "add": self.genset_address,
+        try:
+            decrypted_text = sm4_decrypt(body_text)
+            text_to_parse = decrypted_text
+        except Exception:
+            text_to_parse = body_text
+
+        try:
+            return json.loads(text_to_parse)
+        except Exception:
+            logging.debug("Response not JSON decodable, returning raw text")
+            return {"raw": text_to_parse}
+
+    def _post_encrypted(self, endpoint: str, payload: Dict[str, Any], *, token: Optional[str] = None, login: bool = False) -> Dict[str, Any]:
+        url_path = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+        url = f"{self.base_url}{url_path}"
+        timestamp = int(time.time())
+        token_value = token if token is not None else self.token
+        x_sign = make_x_sign(timestamp, token_value, login=login)
+        headers = self._build_headers(token_value, timestamp, x_sign)
+        encrypted_payload = self._encrypt_payload(payload)
+        logging.debug("POST %s headers=%s", url, {k: v for k, v in headers.items() if k != "X-Token"})
+        response = requests.post(url, data=encrypted_payload, headers=headers, timeout=self.timeout)
+
+        if not login and response.status_code == 401 and self._auto_refresh_token():
+            return self._post_encrypted(endpoint, payload, token=self.token, login=login)
+
+        body_text = (response.text or "").lower()
+        if not login and "token" in body_text and "invalid" in body_text and self._auto_refresh_token():
+            return self._post_encrypted(endpoint, payload, token=self.token, login=login)
+
+        response.raise_for_status()
+        return self._decode_response(response)
+
+    def _authorized_payload(self, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        base_payload: Dict[str, Any] = {
             "token": self.token,
             "utoken": self.utoken,
             "language": self.language,
             "timezone": self.timezone,
         }
-        response = self._request(url, data=payload)
-        if not response:
-            return None
+        if extra:
+            base_payload.update(extra)
+        return base_payload
+
+    def _update_tokens(self, token: Optional[str], utoken: Optional[str]) -> None:
+        if token:
+            self.token = token
+        if utoken is not None:
+            self.utoken = utoken
+        self.save_tokens()
+
+    def login(self, username: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+        user = username or self.username
+        passwd = password or self.password
+        if not user or not passwd:
+            raise ValueError("Username and password are required for login")
+
+        payload = {"username": user, "password": passwd}
+        response = self._post_encrypted("/user/login", payload, token="", login=True)
+        data = response.get("data") if isinstance(response, dict) else None
+        if isinstance(data, dict):
+            self._update_tokens(data.get("token") or data.get("accessToken"), data.get("utoken") or data.get("refreshToken"))
+        return response
+
+    def _auto_refresh_token(self) -> bool:
+        if not self.username or not self.password:
+            return False
         try:
-            return response.json()
-        except json.JSONDecodeError:
-            logging.error("Failed to decode status response")
-            return None
+            logging.info("Refreshing SmartGen tokens via login")
+            self.login(self.username, self.password)
+            return True
+        except Exception as err:  # noqa: BLE001
+            logging.error("Token refresh failed: %s", err)
+            return False
 
-    def fetch_monitor_list(self) -> Optional[Dict[str, Any]]:
-        url = f"{self.api_base}/yewu/realTimeData/monitorList"
-        payload = {
-            "token": self.token,
-            "utoken": self.utoken,
-            "language": self.language,
-            "timezone": self.timezone,
-        }
-        response = self._request(url, json_body=payload)
-        if not response:
-            return None
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-            logging.error("Failed to decode monitor list response")
-            return None
+    def user_info(self) -> Dict[str, Any]:
+        return self._post_encrypted("/user/info", self._authorized_payload())
 
-    def publish_status(self, data: Dict[str, Any]) -> None:
-        topic = f"{self.base_topic}/{self.genset_address}/status/raw"
-        self.mqtt_client.publish(topic, json.dumps(data), qos=1, retain=True)
+    def get_route(self) -> Dict[str, Any]:
+        return self._post_encrypted("/getRoute", self._authorized_payload())
 
-    def publish_monitor_list(self, data: Dict[str, Any]) -> None:
-        if not isinstance(data, dict):
-            return
-        groups = data.get("data") or []
-        now = int(time.time())
-        for group in groups:
-            items = group.get("list") or []
-            for item in items:
-                itemadd = item.get("itemadd") or item.get("add") or "unknown"
-                name = item.get("itemname") or itemadd
-                payload = {
-                    "name": name,
-                    "itemadd": itemadd,
-                    "val": item.get("val"),
-                    "unit": item.get("unit"),
-                    "special": item.get("special"),
-                }
-                topic = f"{self.base_topic}/{self.genset_address}/{itemadd}"
-                self.mqtt_client.publish(topic, json.dumps(payload), qos=1, retain=True)
-        self.mqtt_client.publish(f"{self.base_topic}/{self.genset_address}/last_update", str(now), qos=1, retain=True)
+    def get_alarm_list(self, page: int = 1, page_size: int = 50) -> Dict[str, Any]:
+        return self._post_encrypted(
+            "/getalarmList",
+            self._authorized_payload({"page": page, "pageSize": page_size}),
+        )
+
+    def get_running_time(self) -> Dict[str, Any]:
+        return self._post_encrypted("/getRunningtime", self._authorized_payload())
+
+    def get_pie_chart(self) -> Dict[str, Any]:
+        return self._post_encrypted("/getPiechart", self._authorized_payload())
+
+    def get_ranking_list(self) -> Dict[str, Any]:
+        return self._post_encrypted("/getRankingList", self._authorized_payload())
+
+    def get_monitor_list(self) -> Dict[str, Any]:
+        return self._post_encrypted("/realTimeData/monitorList", self._authorized_payload())
 
     def run(self) -> None:
+        logging.info("Starting SmartGen Cloud Bridge polling loop")
+        if not self.token and self.username and self.password:
+            try:
+                self.login(self.username, self.password)
+            except Exception as err:  # noqa: BLE001
+                logging.error("Initial login failed: %s", err)
         while True:
             try:
-                status = self.fetch_status()
-                if status is not None:
-                    self.publish_status(status)
-                monitor = self.fetch_monitor_list()
-                if monitor is not None:
-                    self.publish_monitor_list(monitor)
-            except Exception as err:  # noqa: BLE001
-                logging.error("Unexpected error in main loop: %s", err)
+                monitor = self.get_monitor_list()
+                logging.info("Monitor list response received")
+                logging.debug("Monitor payload: %s", monitor)
+            except Exception as err:
+                logging.error("Monitor list fetch failed: %s", err)
             time.sleep(self.poll_interval)
 
 
@@ -171,14 +268,32 @@ def load_config(path: str = OPTIONS_PATH) -> Dict[str, Any]:
 
 
 def configure_logging(level: str) -> None:
-    logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO), format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+
+
+def self_test() -> None:
+    sample = {"hello": "world"}
+    sample_text = json.dumps(sample, separators=(",", ":"))
+    encrypted = sm4_encrypt(sample_text)
+    decrypted = sm4_decrypt(encrypted)
+    logging.info("SM4 self-test decrypted payload: %s", decrypted)
+    timestamp = int(time.time())
+    logging.info("X-Sign (with token) sample: %s", make_x_sign(timestamp, "token"))
+    logging.info("X-Sign (login) sample: %s", make_x_sign(timestamp, None, login=True))
 
 
 def main() -> None:
     config = load_config()
     configure_logging(config.get("log_level", "info"))
+    self_test()
     bridge = SmartGenCloudBridge(config)
-    bridge.run()
+    try:
+        bridge.run()
+    except KeyboardInterrupt:
+        logging.info("SmartGen Cloud Bridge stopped")
 
 
 if __name__ == "__main__":
